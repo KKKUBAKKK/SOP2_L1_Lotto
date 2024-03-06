@@ -31,7 +31,7 @@ void usage(char *name)
 char *get_guess_rand(int8_t lowest, int8_t highest)
 {
     int8_t *res = calloc(GUESS_LENGTH, sizeof(int8_t));
-    srand(getpid());
+//    srand(getpid());
     for (int i = 0; i < GUESS_LENGTH; i++)
         res[i] = lowest + rand() % highest;
     return (char *) res;
