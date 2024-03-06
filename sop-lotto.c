@@ -28,54 +28,56 @@ void usage(char *name)
     exit(EXIT_FAILURE);
 }
 
-char *get_guess_rand(int8_t lowest, int8_t highest)
-{
-    int8_t *res = calloc(GUESS_LENGTH, sizeof(int8_t));
-//    srand(getpid());
-    for (int i = 0; i < GUESS_LENGTH; i++)
-        res[i] = lowest + rand() % highest;
-    return (char *) res;
-}
+//char *get_guess_rand(int8_t lowest, int8_t highest)
+//{
+//    int8_t *res = calloc(GUESS_LENGTH, sizeof(int8_t));
+////    srand(getpid());
+//    for (int i = 0; i < GUESS_LENGTH; i++)
+//        res[i] = lowest + rand() % highest;
+//    return (char *) res;
+//}
 
 void player_work(int fdsIn, int fdsOut)
 {
-    char *guess = get_guess_rand(1, 49);
-    char *luckyNumbers = calloc(GUESS_LENGTH, sizeof(char));
-    if (TEMP_FAILURE_RETRY(write(fdsOut, guess, GUESS_LENGTH)) < 0)
-        ERR("write from child");
-    if (TEMP_FAILURE_RETRY(read(fdsIn, luckyNumbers, GUESS_LENGTH)) < 1)
+    int guess[GUESS_LENGTH];
+    srand(getpid());
+    draw(guess);
+    int luckyNumbers[GUESS_LENGTH];
+    pid_t userId = getpid();
+    if (TEMP_FAILURE_RETRY(write(fdsOut, &userId, sizeof(pid_t))) < 0)
+        ERR("write");
+    if (TEMP_FAILURE_RETRY(write(fdsOut, guess, sizeof(guess))) < 0)
+        ERR("write");
+    if (TEMP_FAILURE_RETRY(read(fdsIn, luckyNumbers, sizeof(luckyNumbers))) < 1)
         ERR("read");
-    printf("%d received lucky numbers: %d %d %d %d %d %d\n", getpid(), luckyNumbers[0], luckyNumbers[1],
+    printf("%d received lucky numbers: %d %d %d %d %d %d\n", userId, luckyNumbers[0], luckyNumbers[1],
            luckyNumbers[2], luckyNumbers[3], luckyNumbers[4], luckyNumbers[5]);
-    free(guess);
-    free(luckyNumbers);
 }
 
-void totalizator_work(int n, int *fdsIn, int *fdsOut, int *players_ids)
+void totalizator_work(int n, int *fdsIn, int *fdsOut)
 {
-//    char **players_guesses = malloc(n * sizeof(char*));
-//    char *players_guesses = malloc(GUESS_LENGTH * sizeof(char));
-    char players_guesses[6];
-    char *lucky_numbers = get_guess_rand(1, 49);
+    char players_guesses[GUESS_LENGTH];
+    pid_t playerId;
+    int lucky_numbers[GUESS_LENGTH];
+    draw(lucky_numbers);
 
     // Reading from players pipes their guesses
     for (int i = 0; i < n; i++)
     {
-//        players_guesses[i] = malloc(6 * sizeof(char));
-        if (TEMP_FAILURE_RETRY(read(fdsIn[i], players_guesses, GUESS_LENGTH)) < 1)
+        if (TEMP_FAILURE_RETRY(read(fdsIn[i], &playerId, sizeof(pid_t))) < 1)
             ERR("read");
-        printf("Totalizator Sportowy: %d bet: %d %d %d %d %d %d\n", players_ids[i], players_guesses[0],
+        if (TEMP_FAILURE_RETRY(read(fdsIn[i], players_guesses, sizeof(players_guesses))) < 1)
+            ERR("read");
+        printf("Totalizator Sportowy: %d bet: %d %d %d %d %d %d\n", playerId, players_guesses[0],
                players_guesses[1], players_guesses[2], players_guesses[3], players_guesses[4], players_guesses[5]);
-        if (TEMP_FAILURE_RETRY(write(fdsOut[i], lucky_numbers, GUESS_LENGTH)) < 0)
+        if (TEMP_FAILURE_RETRY(write(fdsOut[i], lucky_numbers, sizeof(lucky_numbers))) < 0)
             ERR("write");
     }
-    printf("Totalizator sportowy: %d %d %d %d %d %d are today's lucky numbers", lucky_numbers[0], lucky_numbers[1],
+    printf("Totalizator sportowy: %d %d %d %d %d %d are today's lucky numbers\n", lucky_numbers[0], lucky_numbers[1],
            lucky_numbers[2], lucky_numbers[3], lucky_numbers[4], lucky_numbers[5]);
-//    free(players_guesses);
-    free(lucky_numbers);
 }
 
-void create_players_and_pipes(int n, int *fdsIn, int *fdsOut, int *players_ids)
+void create_players_and_pipes(int n, int *fdsIn, int *fdsOut)
 {
     int tmpfdIn[2];
     int tmpfdOut[2];
@@ -86,12 +88,11 @@ void create_players_and_pipes(int n, int *fdsIn, int *fdsOut, int *players_ids)
             ERR("pipe");
         if (pipe(tmpfdOut))
             ERR("pipe");
-        switch ((players_ids[--n] = fork()))
+        switch (fork())
         {
             case 0:
-                n++;
                 while (n < max) {
-                    if (fdsIn[n] && TEMP_FAILURE_RETRY(close(fdsIn[n++])))
+                    if (fdsIn[n] && TEMP_FAILURE_RETRY(close(fdsIn[n])))
                         ERR("close");
                     if (fdsOut[n] && TEMP_FAILURE_RETRY(close(fdsOut[n++])))
                         ERR("close");
@@ -109,7 +110,6 @@ void create_players_and_pipes(int n, int *fdsIn, int *fdsOut, int *players_ids)
                 if (TEMP_FAILURE_RETRY(close(tmpfdOut[1])))
                     ERR("close");
                 exit(EXIT_SUCCESS);
-
             case -1:
                 ERR("Fork:");
         }
@@ -117,7 +117,7 @@ void create_players_and_pipes(int n, int *fdsIn, int *fdsOut, int *players_ids)
             ERR("close");
         if (TEMP_FAILURE_RETRY(close(tmpfdOut[1])))
             ERR("close");
-        fdsIn[n] = tmpfdOut[0];
+        fdsIn[--n] = tmpfdOut[0];
         fdsOut[n] = tmpfdIn[1];
     }
 }
@@ -147,19 +147,17 @@ int main(int argc, char **argv)
     if (argc < 3)
         usage(argv[0]);
     int N = atoi(argv[1]);
-//    int T = atoi(argv[2]);
-    int *fdsIn, *fdsOut, *players_ids;
+    int T = atoi(argv[2]);
+    int *fdsIn, *fdsOut;
     if (NULL == (fdsIn = (int *)malloc(sizeof(int) * N)))
         ERR("malloc");
     if (NULL == (fdsOut = (int *)malloc(sizeof(int) * N)))
         ERR("malloc");
-    if (NULL == (players_ids = (int *)malloc(sizeof(int) * N)))
-        ERR("malloc");
-    create_players_and_pipes(N, fdsIn, fdsOut, players_ids);
-    totalizator_work(N, fdsIn, fdsOut, players_ids); //co tu dac
+    create_players_and_pipes(N, fdsIn, fdsOut);
+    totalizator_work(N, fdsIn, fdsOut);
     free(fdsIn);
     free(fdsOut);
-    free(players_ids);
 
+    // jeszcze zamykanie wszystkich pipeow i wywaitowanie dzieci, moze byc z handlerem sigchld
     exit(EXIT_SUCCESS);
 }
